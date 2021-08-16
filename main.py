@@ -3,18 +3,33 @@ import sys
 import random
 
 from bullets import FriendlyProjectile, EnemyProjectile
+from particles import Particle
 from player import Player
 from objects import Ninja, Grunt, Heavy, Rico
 import helper
 import math
 
 pygame.init()
+pygame.mixer.init()
+hit = pygame.mixer.Sound("assets/sounds/hit.mp3")
+kill = pygame.mixer.Sound("assets/sounds/kill.mp3")
 mosaic = pygame.font.Font("assets/fonts/PaletteMosaic-Regular.ttf", 72)
 maven = pygame.font.Font("assets/fonts/MavenPro-Bold.ttf", 72)
+jo = pygame.font.Font("assets/fonts/Jo_wrote_a_lovesong.ttf", 144)
+SONGS = ["assets/music/impatient.wav", "assets/music/cheery.wav", "assets/music/riff.wav"]
 clock = pygame.time.Clock()
 screen_width, screen_height = 1920, 1080
 screen = pygame.display.set_mode((screen_width, screen_height))
 pygame.mouse.set_visible(False)
+
+
+def play():
+    if pygame.mixer.music.get_busy(): return
+    song = random.choice(SONGS)
+    print(song)
+    pygame.mixer.music.load(song)
+    pygame.mixer.music.play()
+
 
 zoom = 1
 decay_zoom = 0
@@ -63,7 +78,7 @@ def center_bar(progress, fg, bg, stack):
 
 
 def arena():
-    global decay_zoom, zoom, shake, decay_shake
+    global decay_zoom, zoom, shake, decay_shake, hit, kill
 
     player = Player(screen_width / 2, screen_height / 2, 32, 100, 100, 3, 8)
 
@@ -72,8 +87,8 @@ def arena():
 
     def new_enemy():
         typen = random.randint(0, 100)
-        pos = random.randint(int(player.x - 600), int(player.x + 600)), \
-            random.randint(int(player.y - 600), int(player.y + 600))
+        pos = random.randint(800, 1000) * (random.randint(0, 1) * 2 - 1) + player.x, \
+            random.randint(800, 1000) * (random.randint(0, 1) * 2 - 1) + player.y
         if typen < 12:
             enemies.append(Ninja(*pos))
         elif typen < 35:
@@ -85,15 +100,35 @@ def arena():
 
     objects = []
     bullets = []
+    particles = []
 
     killstreak = 0
     last_kill_timer = 0
     score = 0
     kill_delay = 200
 
+    def explode(x, y, amt, minforce=1, maxforce=5):
+        p = []
+        for i in range(math.ceil(amt / 4)):
+            angle = math.radians(random.randint(0, 360))
+            force = random.randint(minforce * 100, maxforce * 100) / 100
+
+            xv = math.cos(angle) * force
+            yv = math.sin(angle) * force
+
+            p.append(Particle((random.randint(150, 255), 0, 0), x, y, xv, yv,
+                              random.randint(math.ceil(i ** 0.25), math.ceil(2 * i ** (1 / 3))),
+                              decay=45, friction=0.1))
+        return p
+
+    def hallucinate():
+        return random.randint(0, 1500) < player.insanity
+
     while True:
+        play()
         if killstreak:
-            player.insanity = killstreak
+            player.insanity += killstreak / 1200
+            player.insanity += 0.5
 
         last_kill_timer -= 1
         if last_kill_timer < 0:
@@ -181,14 +216,30 @@ def arena():
 
         final = []
         for enemy in enemies.copy():
+            enemy.hit -= 1
             if attack_location:
-                if helper.segment_to_point(*attack_location, player.x, player.y, enemy.x, enemy.y) < 75:
+                if helper.segment_to_point(*attack_location, player.x, player.y, enemy.x, enemy.y) < enemy.s + 16:
                     decay_shake = 15
                     enemy.damage(30)
+                    particles += explode(enemy.x + enemy.s / 2, enemy.y + enemy.s / 2, 150)
+                    pygame.mixer.Sound.play(hit)
+                    enemy.hit = 10
                     if player.siphon:
                         player.hp = min(player.mhp, player.hp + 5)
             if enemy.hp <= 0:
                 enemies.remove(enemy)
+                pygame.mixer.Sound.play(kill)
+
+                mnf, mxf = 1, 5
+                if 500 <= enemy.mhp < 1000:
+                    mxf = 7
+                elif 1000 <= enemy.mhp < 1500:
+                    mxf = 10
+                elif 1500 <= enemy.mhp:
+                    mxf = 20
+
+                particles += explode(enemy.x + enemy.s / 2, enemy.y + enemy.s / 2, enemy.blood, mnf, mxf)
+
                 killstreak += 1
                 last_kill_timer = kill_delay
                 decay_shake += killstreak
@@ -201,11 +252,14 @@ def arena():
             enemy.dodge(bullets)
             total_change = move_change_x, move_change_y
             if helper.dist(enemy.x, enemy.y, player.x, player.y) < enemy.s:
+                if player.iframes <= 0:
+                    pygame.mixer.Sound.play(hit)
+                    particles += explode(player.x, player.y, enemy.dmg)
                 player.damage(enemy.dmg)
                 evade_direction = math.radians(random.randint(0, 360))
 
-                evade_x = math.cos(evade_direction) * enemy.speed * 4
-                evade_y = math.sin(evade_direction) * enemy.speed * 4
+                evade_x = math.cos(evade_direction) * enemy.speed * 6
+                evade_y = math.sin(evade_direction) * enemy.speed * 6
 
                 enemy.dcxv += evade_x
                 enemy.dcyv += evade_y
@@ -224,15 +278,26 @@ def arena():
             enemy.draw(display, player)
             final.append(enemy)
 
+        for particle in particles.copy():
+            if particle.main(display, player):
+                particles.remove(particle)
+
         for bullet in bullets.copy():
             bullet.main(display, player)
 
             if type(bullet) == FriendlyProjectile:
                 for enemy in enemies.copy():
                     if helper.dist(enemy.x + enemy.s / 2, enemy.y + enemy.s / 2, bullet.x, bullet.y) < enemy.s * 0.9:
+                        enemy.dcxv += bullet.xv / 5
+                        enemy.dcyv += bullet.yv / 5
+                        enemy.stagger = 5
                         bullet.xv *= 1 - enemy.s / 150
                         bullet.yv *= 1 - enemy.s / 150
                         enemy.damage(bullet.damage)
+                        if enemy.hit < 0:
+                            pygame.mixer.Sound.play(hit)
+                        enemy.hit = 10
+                        particles += explode(bullet.x, bullet.y, bullet.damage)
                         if player.siphon:
                             player.hp = min(player.mhp, player.hp + 0.3)
                         break
@@ -240,6 +305,9 @@ def arena():
                 if helper.dist(player.x + player.width / 2, player.y + player.height / 2, bullet.x, bullet.y) < \
                         math.sqrt(player.width ** 2 + player.height ** 2):
                     bullets.remove(bullet)
+                    if player.iframes <= 0:
+                        pygame.mixer.Sound.play(hit)
+                        particles += explode(player.x, player.y, bullet.damage)
                     player.damage(bullet.damage)
                     break
 
@@ -269,6 +337,19 @@ def arena():
         bar(last_kill_timer / kill_delay, (255, 255, 255), (50, 50, 50), 16, 168, 200, 8)
         screen.blit(mosaic.render(f"x{killstreak}", True, (255, 255, 255)), (16, 72))
 
+        if hallucinate():
+            hallucination = random.choice([
+                "KILL KILL KILL",
+                "END THEM ALL",
+                "NO SQUARE LEFT",
+                "GENOCIDE GENOCIDE GENOCIDE",
+                "INSANE INSANE INSANE",
+                "DON'T STOP"
+            ])
+            text = jo.render(hallucination, False, (255, 255, 255))
+            screen.blit(text, (screen_width / 2 - text.get_width() / 2, screen_height / 2 - 144))
+            decay_shake += 15
+
         if player.hp <= 0:
             tint = pygame.Surface((screen_width, screen_height), pygame.SRCALPHA).convert_alpha()
             tint.fill((0, 0, 0, 100))
@@ -279,7 +360,9 @@ def arena():
             pygame.display.flip()
 
             waiting = True
+            actiondelay = 100
             while waiting:
+                actiondelay -= 1
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         pygame.quit()
@@ -288,11 +371,12 @@ def arena():
                         if event.key == pygame.K_ESCAPE:
                             pygame.quit()
                             sys.exit()
-                        else:
+                        elif actiondelay < 0:
                             waiting = False
                             break
-                    elif event.type == pygame.MOUSEBUTTONDOWN:
+                    elif actiondelay < 0 and event.type == pygame.MOUSEBUTTONDOWN:
                         waiting = False
+                clock.tick(60)
             break
 
         clock.tick(60)
@@ -300,6 +384,11 @@ def arena():
 
 
 def menu():
+    global decay_shake, shake, decay_zoom, zoom
+    decay_zoom = 2
+    zoom = 1
+    shake = 5
+    decay_shake = 50
     fonts144 = [
         pygame.font.Font(f"assets/fonts/{x}.ttf", 144)
         for x in ("Jo_wrote_a_lovesong", "MavenPro-Bold", "Monofett-Regular", "PaletteMosaic-Regular")
@@ -315,6 +404,9 @@ def menu():
     font72 = random.choice(fonts72)
     fonttimer = 10
     while True:
+        play()
+        decay_shake = max(0, decay_shake - 1)
+        decay_zoom = max(0, decay_zoom - 0.1)
         fonttimer -= 1
         if fonttimer < 0:
             newfont144 = font144
@@ -345,9 +437,9 @@ def menu():
                     pygame.quit()
                     sys.exit()
                 elif event.key == pygame.K_w or event.key == pygame.K_UP:
-                    index = min(0, index - 1)
+                    index = max(0, index - 1)
                 elif event.key == pygame.K_s or event.key == pygame.K_DOWN:
-                    index = max(len(options) - 1, index + 1)
+                    index = min(len(options) - 1, index + 1)
                 elif event.key == pygame.K_RETURN:
                     done = True
                     break
@@ -356,6 +448,8 @@ def menu():
         clock.tick(60)
         pygame.display.flip()
     selection = options[index]
+    shake = 0
+    decay_zoom = 2
     if selection == "quit":
         pygame.quit()
         sys.exit()
@@ -364,6 +458,7 @@ def menu():
 
 
 if __name__ == "__main__":
+    play()
     while True:
         menu()
         arena()

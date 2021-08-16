@@ -35,17 +35,21 @@ class Enemy(Square):
     def __init__(self, x, y, s, hp, damage, speed, color=(255, 0, 0)):
         super().__init__(x, y, s, color)
         self.dcolor = color
+        self.hit = 0
         self.speed = speed
         self.hp = hp
-        self.blood = hp ** 2
+        self.mhp = hp
+        self.blood = hp * 2
         self.score = 1
         self.dmg = damage
         self.dcxv = 0
         self.dcyv = 0
         self.friction = 1
         self.flash = 0
+        self.stagger = 0
 
     def main(self, display, player):
+        self.stagger -= 1
         if helper.dist(self.x, self.y, player.x, player.y) < 2:
             player.damage(self.dmg)
 
@@ -79,6 +83,8 @@ class Grunt(Enemy):
         super().__init__(x, y, 32, 15, 3, 4, (255, 0, 0))
 
     def chase(self, player):
+        if self.stagger > 0:
+            return 0, 0, []
         angle = math.atan2(player.y - self.y, player.x - self.x)
         self.x += math.cos(angle) * self.speed + self.dcxv
         self.y += math.sin(angle) * self.speed + self.dcyv
@@ -126,6 +132,8 @@ class Heavy(Enemy):
         self.score = 5
 
     def chase(self, player):
+        if self.stagger > 0:
+            return 0, 0, []
         self.fire_cooldown -= 1
         self.shot_timer -= 1
 
@@ -175,4 +183,3 @@ class Rico(Enemy):
                                         5))
 
         return math.cos(angle) * self.speed, math.sin(angle) * self.speed, proj
-

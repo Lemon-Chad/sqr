@@ -5,8 +5,13 @@ import helper
 from bullets import FriendlyProjectile
 import sys
 
+pygame.mixer.init()
 items = {
-    k: pygame.transform.scale(pygame.image.load(f"assets/items/{k}.png"), (48, 48))
+    k: {
+        "sprite": pygame.transform.scale(pygame.image.load(f"assets/items/{k}.png"), (48, 48)),
+        "equip": pygame.mixer.Sound(f"assets/sounds/{k}_equip.mp3"),
+        "fire": pygame.mixer.Sound(f"assets/sounds/{k}_fire.mp3")
+    }
     for k in ["pistol", "shotgun"]
 }
 SPREAD = int(math.pi / 4 * 100)
@@ -62,7 +67,7 @@ class Player:
         self.recoil = 0
         self.cooldown = 0
 
-        self.insanity = 0
+        self.insanity = 100
 
         self.hp = hp
         self.mhp = hp
@@ -108,6 +113,7 @@ class Player:
             self.equipped = None
         else:
             self.equipped = self.inventory[index]
+            pygame.mixer.Sound.play(items[self.equipped]["equip"])
 
     def main(self, display):
         self.iframes -= 1
@@ -168,7 +174,7 @@ class Player:
         else:
             hand = pygame.Surface((48, 48), pygame.SRCALPHA).convert_alpha()
             hand.fill((255, 0, 0, 0))
-            hand.blit(items[self.equipped], (0, 0))
+            hand.blit(items[self.equipped]["sprite"], (0, 0))
 
             pos = (self.right_hand_pos[0] - 8 + random.randint(0, 10 + int(self.insanity)) / 8,
                    self.right_hand_pos[1] - 24 + random.randint(0, 10 + int(self.insanity)) / 8)
@@ -208,8 +214,9 @@ class Player:
             y + self.height / 2 + math.sin(self.angle + bloom - math.radians(self.recoil) * recoil_factor) * 50
 
     def phase(self):
-        if self.stamina > 25:
-            self.stamina -= 25
+        if self.stamina > 10:
+            self.stamina -= 10
+            self.iframes = 20
 
             self.dcxv = self.xv * 3
             self.dcyv = self.yv * 3
@@ -265,6 +272,10 @@ class Player:
 
         precoil = self.recoil
         recoil_factor = 1 if -math.pi / 2 < self.angle < math.pi / 2 else -1
+
+        if self.equipped is not None:
+            pygame.mixer.Sound.play(items[self.equipped]["fire"])
+
         if self.equipped == "pistol":
             self.recoil += 15
             self.cooldown = 15
