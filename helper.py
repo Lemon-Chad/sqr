@@ -71,11 +71,16 @@ def checkerboard(display, origin, size=64):
             pygame.draw.rect(display, color, (i * size - ox, j * size - oy, size, size))
 
 
-def bar(screen, progress, fg, bg, x, y, width, height):
+def bar(screen, progress, fg, bg, x, y, width, height, label: str = None, label_font: pygame.font.Font = None,
+        labelcolor=(255, 255, 255), ypad=0):
     pygame.draw.rect(screen, bg, (x, y, width, height))
     pygame.draw.rect(screen, fg, (x, y, width * progress, height))
+    if label is not None and label_font is not None:
+        t = label_font.render(label, False, labelcolor)
+        screen.blit(t, (x + width / 2 - t.get_width() / 2, y + ypad))
 
 
-def center_bar(screen, progress, fg, bg, stack):
-    bar(screen, progress, fg, bg, screen.get_width() / 2 - 384, screen.get_height() - 48 * stack, 768, 32)
+def center_bar(screen, progress, fg, bg, stack, label=None, label_font=None, labelcolor=(255, 255, 255), ypad=0):
+    bar(screen, progress, fg, bg, screen.get_width() / 2 - 384, screen.get_height() - 48 * stack, 768, 32, label,
+        label_font, labelcolor, ypad)
 

@@ -36,6 +36,7 @@ class Enemy(Square):
         super().__init__(x, y, s, color)
         self.dcolor = color
         self.hit = 0
+        self.dmgnum = None
         self.speed = speed
         self.hp = hp
         self.mhp = hp
@@ -50,8 +51,6 @@ class Enemy(Square):
 
     def main(self, display, player):
         self.stagger -= 1
-        if helper.dist(self.x, self.y, player.x, player.y) < 2:
-            player.damage(self.dmg)
 
         if self.flash > 0:
             self.color = (255, 255, 255)
@@ -76,6 +75,9 @@ class Enemy(Square):
     def damage(self, amt):
         self.hp -= amt
         self.flash = 5
+
+    def mutator(self, lst):
+        return [], False
 
 
 class Grunt(Enemy):
@@ -138,7 +140,7 @@ class Heavy(Enemy):
         self.shot_timer -= 1
 
         if self.fire_cooldown <= 0:
-            self.shots_left = 4
+            self.shots_left = 3
             self.fire_cooldown = 250
 
         direction = -1 if helper.dist(player.x, player.y, self.x, self.y) <= 400 else 1
@@ -149,12 +151,51 @@ class Heavy(Enemy):
         proj = []
         if self.shots_left > 0 and self.shot_timer <= 0:
             self.shots_left -= 1
-            self.shot_timer = 30
+            self.shot_timer = 45
             proj.append(EnemyProjectile(self.x + self.s / 2, self.y + self.s / 2,
                                         math.cos(angle) * 10, math.sin(angle) * 10,
                                         3))
 
         return math.cos(angle) * self.speed * direction, math.sin(angle) * self.speed * direction, proj
+
+
+class Dasher(Enemy):
+    def __init__(self, x, y):
+        super().__init__(x, y, 64, 100, 1, 3, (255, 255, 0))
+        self.fire_cooldown = 0
+        self.shot_timer = 0
+        self.shots_left = 0
+        self.score = 5
+
+    def chase(self, player):
+        if self.stagger > 0:
+            return 0, 0, []
+        self.fire_cooldown -= 1
+        self.shot_timer -= 1
+
+        angle = math.atan2(player.y - self.y, player.x - self.x)
+
+        if self.fire_cooldown <= 0:
+            self.shots_left = 1
+            self.fire_cooldown = 60
+
+            self.dcxv += math.cos(angle) * self.speed * 6
+            self.dcyv += math.sin(angle) * self.speed * 6
+
+        self.x += self.dcxv
+        self.y += self.dcyv
+
+        print(self.dcxv, self.dcyv)
+
+        proj = []
+        if self.shots_left > 0 and self.shot_timer <= 0:
+            self.shots_left -= 1
+            self.shot_timer = 30
+            proj.append(EnemyProjectile(self.x + self.s / 2, self.y + self.s / 2,
+                                        math.cos(angle) * 10, math.sin(angle) * 10,
+                                        3))
+
+        return math.cos(angle) * self.speed, math.sin(angle) * self.speed, proj
 
 
 class Rico(Enemy):
@@ -165,8 +206,9 @@ class Rico(Enemy):
         self.maxhp = 2500
 
     def main(self, display, player):
+        x, y = self.screenspace(player)
         helper.bar(display, self.hp / self.maxhp, (255, 255, 255), (50, 50, 50),
-                   display.get_width() / 2 - 384, 48, 768, 32)
+                   x + self.s / 2 - 125, y - 48, 250, 32)
         return super().main(display, player)
 
     def chase(self, player):
@@ -183,3 +225,72 @@ class Rico(Enemy):
                                         5))
 
         return math.cos(angle) * self.speed, math.sin(angle) * self.speed, proj
+
+
+class Virus(Enemy):
+    def __init__(self, x, y, hp=50):
+        super().__init__(x, y, 24, hp, 1, 4, (122, 0, 255))
+        self.maxspawndelay = 90
+        self.spawndelay = random.randint(self.maxspawndelay, self.maxspawndelay + 50)
+
+    def mutator(self, lst):
+        if self.spawndelay < 0:
+            self.spawndelay = self.maxspawndelay + self.hp
+            offs = random.randint(int(-math.pi / 2 * 100), int(math.pi / 2 * 100)) / 100
+            for _ in range(random.randint(1, 2)):
+                direction = random.randint(int(-math.pi / 2 * 100), int(math.pi / 2 * 100)) / 100
+                xv = 15 * math.cos(direction)
+                yv = 15 * math.sin(direction)
+                e = Virus(self.x, self.y, self.hp)
+                e.dcxv = xv
+                e.dcyv = yv
+                lst.append(e)
+
+            p = []
+            projcount = 3
+            for i in range(projcount + 1):
+                direction = math.radians(i * 360 / projcount) + offs
+                xv = math.cos(direction) * 15
+                yv = math.sin(direction) * 15
+                p.append(EnemyProjectile(self.x, self.y, xv, yv, self.hp / 5))
+            return p, True
+        return [], False
+
+    def chase(self, player):
+        if self.stagger > 0:
+            return 0, 0, []
+        self.spawndelay -= 1
+        angle = math.atan2(player.y - self.y, player.x - self.x)
+        self.x += math.cos(angle) * self.speed + self.dcxv
+        self.y += math.sin(angle) * self.speed + self.dcyv
+        return math.cos(angle) * self.speed, math.sin(angle) * self.speed, []
+
+
+class Infested(Enemy):
+    def __init__(self, x, y):
+        super().__init__(x, y, 500, 2500, 1, 1, (154, 168, 42))
+        self.spawn = 0
+        self.minspawndelay, self.maxspawndelay = 90, 120
+
+    def mutator(self, lst):
+        self.spawn -= 1
+        if self.spawn < 0:
+            self.spawn = random.randint(self.minspawndelay, self.maxspawndelay)
+            direction = random.randint(int(-math.pi * 100), int(math.pi * 100)) / 100
+            offs = math.cos(direction) * self.s, math.sin(direction) * self.s
+            lst.append(Grunt(self.x + offs[0], self.y + offs[1]))
+        return [], False
+
+    def chase(self, player):
+        if self.stagger > 0:
+            return 0, 0, []
+        angle = math.atan2(player.y - self.y, player.x - self.x)
+        self.x += math.cos(angle) * -self.speed + self.dcxv
+        self.y += math.sin(angle) * -self.speed + self.dcyv
+        return math.cos(angle) * -self.speed, math.sin(angle) * -self.speed, []
+
+    def main(self, display, player):
+        x, y = self.screenspace(player)
+        helper.bar(display, self.hp / self.mhp, (255, 255, 255), (50, 50, 50),
+                   x + self.s / 2 - 125, y - 48, 250, 32)
+        return super().main(display, player)

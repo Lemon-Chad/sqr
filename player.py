@@ -12,7 +12,7 @@ items = {
         "equip": pygame.mixer.Sound(f"assets/sounds/{k}_equip.mp3"),
         "fire": pygame.mixer.Sound(f"assets/sounds/{k}_fire.mp3")
     }
-    for k in ["pistol", "shotgun"]
+    for k in ["pistol", "shotgun", "sniper"]
 }
 SPREAD = int(math.pi / 4 * 100)
 
@@ -40,7 +40,7 @@ class Player:
         self.angle = 0
         self.angle2 = 0
 
-        self.inventory = [None, "pistol", "shotgun"]
+        self.inventory = [None, "pistol", "shotgun", "sniper"]
         self.equipped = "pistol"
 
         self.moving = False
@@ -65,7 +65,11 @@ class Player:
         self.height = s
 
         self.recoil = 0
-        self.cooldown = 0
+        self.cooldowns = {
+            k: 0
+            for k in self.inventory
+            if k
+        }
 
         self.insanity = 100
 
@@ -118,7 +122,7 @@ class Player:
     def main(self, display):
         self.iframes -= 1
         self.recoil = max(0, self.recoil - 1 * self.cooldown_multi)
-        self.cooldown = max(0, self.cooldown - 1 * self.cooldown_multi)
+        self.cooldowns = {k: max(0, c - 1 * self.cooldown_multi) for k, c in self.cooldowns.items()}
         self.insanity = max(0, self.insanity - 0.5)
 
         if self.active_blood:
@@ -209,7 +213,7 @@ class Player:
             y = self.ry
 
         recoil_factor = 1 if -math.pi / 2 < self.angle < math.pi / 2 else -1
-        bloom = math.radians(random.randint(-int(self.insanity / 10), int(self.insanity / 10)))
+        bloom = math.radians(random.randint(-int(self.insanity / 3), int(self.insanity / 3)))
         return x + self.width / 2 + math.cos(self.angle + bloom - math.radians(self.recoil) * recoil_factor) * 50, \
             y + self.height / 2 + math.sin(self.angle + bloom - math.radians(self.recoil) * recoil_factor) * 50
 
@@ -258,7 +262,7 @@ class Player:
         self.iframes = 30
 
     def make_projectile(self, precoil, recoil_factor, damage, speed=5, x_off=0, y_off=0, xv_off=0, yv_off=0):
-        bloom = math.radians(random.randint(-int(self.insanity / 10), int(self.insanity / 10)))
+        bloom = math.radians(random.randint(-int(self.insanity / 3), int(self.insanity / 3)))
         return FriendlyProjectile(self.x + self.width / 2 + x_off, self.y + self.height / 2 + y_off,
                                   math.cos(self.angle + bloom - math.radians(precoil) * recoil_factor) * speed
                                   + self.xv + xv_off,
@@ -267,7 +271,7 @@ class Player:
                                   damage * self.damage_multi)
 
     def shoot(self):
-        if self.cooldown > 0:
+        if self.equipped and self.cooldowns[self.equipped] > 0:
             return []
 
         precoil = self.recoil
@@ -278,11 +282,11 @@ class Player:
 
         if self.equipped == "pistol":
             self.recoil += 15
-            self.cooldown = 15
+            self.cooldowns["pistol"] = 15
             return [self.make_projectile(precoil, recoil_factor, 5, 15)]
         elif self.equipped == "shotgun":
             self.recoil += 45
-            self.cooldown = 60
+            self.cooldowns["shotgun"] = 60
 
             procs = []
             for _ in range(10):
@@ -295,11 +299,28 @@ class Player:
             self.dcxv = math.cos(self.angle + math.pi) * 30
             self.dcyv = math.sin(self.angle + math.pi) * 30
             return procs
+        elif self.equipped == "sniper":
+            self.recoil += 80
+            self.cooldowns["sniper"] = 80
+
+            self.dcxv = math.cos(self.angle + math.pi) * 30
+            self.dcyv = math.sin(self.angle + math.pi) * 30
+
+            procs = []
+            for _ in range(3):
+                randangle = self.angle + random.randint(-SPREAD, SPREAD) / 100
+                intensity = random.randint(1, 5)
+                procs.append(self.make_projectile(precoil, recoil_factor, 50, 60,
+                                                  xv_off=math.cos(randangle) * intensity,
+                                                  yv_off=math.sin(randangle) * intensity))
+
+            return procs
         return []
 
     def blood_event(self, screen):
         if self.blood_meter < self.blood_max:
             return
+        self.insanity += 50
         clock = pygame.time.Clock()
         maven = pygame.font.Font("assets/fonts/PaletteMosaic-Regular.ttf", 96)
         options = ["rampage", "siphon", "speed demon"]

@@ -3,9 +3,9 @@ import sys
 import random
 
 from bullets import FriendlyProjectile, EnemyProjectile
-from particles import Particle
+from particles import Particle, DamageNumber
 from player import Player
-from objects import Ninja, Grunt, Heavy, Rico
+from objects import Ninja, Grunt, Heavy, Rico, Virus, Dasher, Infested
 import helper
 import math
 
@@ -14,8 +14,11 @@ pygame.mixer.init()
 hit = pygame.mixer.Sound("assets/sounds/hit.mp3")
 kill = pygame.mixer.Sound("assets/sounds/kill.mp3")
 mosaic = pygame.font.Font("assets/fonts/PaletteMosaic-Regular.ttf", 72)
-maven = pygame.font.Font("assets/fonts/MavenPro-Bold.ttf", 72)
+mosaic32 = pygame.font.Font("assets/fonts/PaletteMosaic-Regular.ttf", 24)
+mosaic48 = pygame.font.Font("assets/fonts/PaletteMosaic-Regular.ttf", 32)
+maven = pygame.font.Font("assets/fonts/MavenPro-Bold.ttf", 32)
 jo = pygame.font.Font("assets/fonts/Jo_wrote_a_lovesong.ttf", 144)
+jo32 = pygame.font.Font("assets/fonts/Jo_wrote_a_lovesong.ttf", 28)
 SONGS = ["assets/music/impatient.wav", "assets/music/cheery.wav", "assets/music/riff.wav"]
 clock = pygame.time.Clock()
 screen_width, screen_height = 1920, 1080
@@ -26,7 +29,6 @@ pygame.mouse.set_visible(False)
 def play():
     if pygame.mixer.music.get_busy(): return
     song = random.choice(SONGS)
-    print(song)
     pygame.mixer.music.load(song)
     pygame.mixer.music.play()
 
@@ -63,18 +65,18 @@ def render(centerx=None, centery=None):
     if centery is None:
         centery = screen_height / 2
     real_zoom = decay_zoom + zoom
-    real_shake = int(decay_shake + shake)
+    real_shake = int(math.log((decay_shake + shake) ** 2, 1.25)) if decay_shake + shake > 0 else 0
     screen.blit(pygame.transform.scale(display, (int(screen_width * real_zoom), int(screen_height * real_zoom))),
                 (-int(centerx * (real_zoom - 1)) + random.randint(0, real_shake),
                  -int(centery * (real_zoom - 1)) + random.randint(0, real_shake)))
 
 
-def bar(progress, fg, bg, x, y, width, height):
-    helper.bar(screen, progress, fg, bg, x, y, width, height)
+def bar(progress, fg, bg, x, y, width, height, label=None, label_font=None, labelcolor=(255, 255, 255), ypad=0):
+    helper.bar(screen, progress, fg, bg, x, y, width, height, label, label_font, labelcolor, ypad)
 
 
-def center_bar(progress, fg, bg, stack):
-    helper.center_bar(screen, progress, fg, bg, stack)
+def center_bar(progress, fg, bg, stack, label=None, label_font=None, labelcolor=(255, 255, 255), ypad=0):
+    helper.center_bar(screen, progress, fg, bg, stack, label, label_font, labelcolor, ypad)
 
 
 def arena():
@@ -84,19 +86,28 @@ def arena():
 
     enemies = []
     enemy_timer = 0
+    difficulty = 0
 
     def new_enemy():
-        typen = random.randint(0, 100)
+        typen = random.randint(0, int(difficulty))
         pos = random.randint(800, 1000) * (random.randint(0, 1) * 2 - 1) + player.x, \
             random.randint(800, 1000) * (random.randint(0, 1) * 2 - 1) + player.y
-        if typen < 12:
-            enemies.append(Ninja(*pos))
-        elif typen < 35:
-            enemies.append(Heavy(*pos))
-        elif typen < 36:
-            enemies.append(Rico(*pos))
-        else:
-            enemies.append(Grunt(*pos))
+        enem = Grunt
+        if typen <= 25:
+            enem = Grunt
+        elif typen < 50:
+            enem = Heavy
+        elif typen < 60:
+            enem = Ninja
+        elif typen < 70:
+            enem = Dasher
+        elif typen < 80:
+            enem = Virus
+        elif typen < 85:
+            enem = Rico
+        elif typen < 86:
+            enem = Infested
+        enemies.append(enem(*pos))
 
     objects = []
     bullets = []
@@ -106,6 +117,9 @@ def arena():
     last_kill_timer = 0
     score = 0
     kill_delay = 200
+
+    minimap_size = 125
+    marker_size = minimap_size / 16
 
     def explode(x, y, amt, minforce=1, maxforce=5):
         p = []
@@ -125,6 +139,7 @@ def arena():
         return random.randint(0, 1500) < player.insanity
 
     while True:
+        map_points = []
         play()
         if killstreak:
             player.insanity += killstreak / 1200
@@ -133,6 +148,7 @@ def arena():
         last_kill_timer -= 1
         if last_kill_timer < 0:
             killstreak = 0
+        difficulty = min(100, difficulty + 0.01)
 
         mx, my = pygame.mouse.get_pos()
         display.fill((30, 30, 30))
@@ -144,7 +160,7 @@ def arena():
         enemy_timer -= random.randint(1, 5) * 0.66
         if enemy_timer <= 0:
             new_enemy()
-            enemy_timer = random.randint(120, 150)
+            enemy_timer = random.randint(200, 300)
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -175,7 +191,7 @@ def arena():
             bullets += s
             if s:
                 if player.equipped == "shotgun":
-                    decay_shake = 50
+                    decay_shake = 25
                 elif player.equipped == "pistol":
                     decay_shake = 5
 
@@ -218,17 +234,29 @@ def arena():
         for enemy in enemies.copy():
             enemy.hit -= 1
             if attack_location:
-                if helper.segment_to_point(*attack_location, player.x, player.y, enemy.x, enemy.y) < enemy.s + 16:
+                if helper.segment_to_point(*attack_location, player.x, player.y, enemy.x + enemy.s / 2,
+                                           enemy.y + enemy.s / 2) < enemy.s / 2 + 32:
                     decay_shake = 15
                     enemy.damage(30)
-                    particles += explode(enemy.x + enemy.s / 2, enemy.y + enemy.s / 2, 150)
-                    pygame.mixer.Sound.play(hit)
-                    enemy.hit = 10
+                    if enemy.dmgnum is None:
+                        dn = DamageNumber(30, mosaic48, *attack_location, enemy)
+                        particles.append(dn)
+                        enemy.dmgnum = dn
+                    else:
+                        enemy.dmgnum.stack(30)
+                        enemy.dmgnum.x, enemy.dmgnum.y = attack_location
                     if player.siphon:
                         player.hp = min(player.mhp, player.hp + 5)
-            if enemy.hp <= 0:
+
+            enemy_bullets, dead = enemy.mutator(enemies)
+            if enemy_bullets:
+                bullets += enemy_bullets
+
+            if helper.dist(enemy.x + enemy.s / 2, enemy.y + enemy.s / 2, player.x, player.y) > 7500:
+                dead = True
+
+            if enemy.hp <= 0 or dead:
                 enemies.remove(enemy)
-                pygame.mixer.Sound.play(kill)
 
                 mnf, mxf = 1, 5
                 if 500 <= enemy.mhp < 1000:
@@ -240,18 +268,22 @@ def arena():
 
                 particles += explode(enemy.x + enemy.s / 2, enemy.y + enemy.s / 2, enemy.blood, mnf, mxf)
 
-                killstreak += 1
-                last_kill_timer = kill_delay
-                decay_shake += killstreak
-                score += enemy.score * 100 + random.randint(0, 99)
-                player.blood_meter = min(player.blood_meter + enemy.score ** (0.5 if player.active_blood else 1),
-                                         player.blood_max)
+                if not dead:
+                    pygame.mixer.Sound.play(kill)
+                    killstreak += 1
+                    last_kill_timer = kill_delay
+                    decay_shake += killstreak
+                    score += enemy.score * 100 + random.randint(0, 99)
+                    player.blood_meter = min(player.blood_meter + enemy.score ** (0.5 if player.active_blood else 1),
+                                             player.blood_max)
                 continue
+
             move_change_x, move_change_y, enemy_bullets = enemy.main(display, player)
             bullets += enemy_bullets
             enemy.dodge(bullets)
+
             total_change = move_change_x, move_change_y
-            if helper.dist(enemy.x, enemy.y, player.x, player.y) < enemy.s:
+            if helper.dist(enemy.x + enemy.s / 2, enemy.y + enemy.s / 2, player.x, player.y) < enemy.s * 0.6 + 16:
                 if player.iframes <= 0:
                     pygame.mixer.Sound.play(hit)
                     particles += explode(player.x, player.y, enemy.dmg)
@@ -261,13 +293,22 @@ def arena():
                 evade_x = math.cos(evade_direction) * enemy.speed * 6
                 evade_y = math.sin(evade_direction) * enemy.speed * 6
 
-                enemy.dcxv += evade_x
-                enemy.dcyv += evade_y
+                print(evade_x, evade_y)
+
+                enemy.dcxv = evade_x
+                enemy.dcyv = evade_y
+
+            if helper.dist(enemy.x + enemy.s / 2, enemy.y + enemy.s / 2, player.x, player.y) < (minimap_size - 16) * 20:
+                map_points.append((
+                    (enemy.x - player.x) / 20,
+                    (enemy.y - player.y) / 20,
+                    enemy.color
+                ))
 
             tolerance = 16
             for target in final:
                 if enemy == target: continue
-                if helper.dist(target.x, target.y, enemy.x, enemy.y) < tolerance:
+                if helper.dist(target.x, target.y, enemy.x + enemy.s / 2, enemy.y + enemy.s / 2) < tolerance:
                     if (target.x == enemy.x and target.y == enemy.y) or (total_change[0] == 0 and total_change[1] == 0):
                         enemy.x -= target.s
                         enemy.y -= target.s
@@ -287,15 +328,32 @@ def arena():
 
             if type(bullet) == FriendlyProjectile:
                 for enemy in enemies.copy():
-                    if helper.dist(enemy.x + enemy.s / 2, enemy.y + enemy.s / 2, bullet.x, bullet.y) < enemy.s * 0.9:
+                    if helper.dist(enemy.x + enemy.s / 2, enemy.y + enemy.s / 2, bullet.x, bullet.y) < enemy.s * 0.6:
                         enemy.dcxv += bullet.xv / 5
                         enemy.dcyv += bullet.yv / 5
                         enemy.stagger = 5
                         bullet.xv *= 1 - enemy.s / 150
                         bullet.yv *= 1 - enemy.s / 150
+
+                        if bullet.damage > enemy.hp:
+                            total_damage = enemy.hp
+                        else:
+                            total_damage = bullet.damage
+
                         enemy.damage(bullet.damage)
+
+                        if enemy.dmgnum is None:
+                            dn = DamageNumber(total_damage, mosaic48, bullet.x, bullet.y, enemy)
+                            particles.append(dn)
+                            enemy.dmgnum = dn
+                        else:
+                            enemy.dmgnum.stack(total_damage)
+                            enemy.dmgnum.x = bullet.x
+                            enemy.dmgnum.y = bullet.y
+
                         if enemy.hit < 0:
                             pygame.mixer.Sound.play(hit)
+
                         enemy.hit = 10
                         particles += explode(bullet.x, bullet.y, bullet.damage)
                         if player.siphon:
@@ -325,12 +383,24 @@ def arena():
 
         render(player.rx, player.ry)
 
-        center_bar(player.stamina / player.max_stamina, (255, 255, 255), (50, 50, 50), 1)
+        center_bar(player.stamina / player.max_stamina, (255, 255, 255), (50, 50, 50), 1, "STAMINA", maven,
+                   (0, 0, 0), -4)
         center_bar(player.hp / player.mhp, (255 * (player.mhp - player.hp) / player.mhp,
                                             255 * player.hp / player.mhp, 0),
                    (80 * (player.mhp - player.hp) / player.mhp,
-                    80 * player.hp / player.mhp, 0), 2)
-        center_bar(player.blood_meter / player.blood_max, (255, 0, 0), (75, 50, 50), 3)
+                    80 * player.hp / player.mhp, 0), 2, "HEALTH", mosaic32, ypad=-2)
+        center_bar(player.blood_meter / player.blood_max, (255, 0, 0), (75, 50, 50), 3, "BLOOD", jo32, ypad=1)
+
+        minimap_surf = pygame.Surface((minimap_size * 2, minimap_size * 2), pygame.SRCALPHA)
+        minimap_surf.fill((0, 0, 0, 0))
+
+        pygame.draw.circle(minimap_surf, (0, 0, 0), (minimap_size, minimap_size), minimap_size)
+        pygame.draw.circle(minimap_surf, (0, 255, 0), (minimap_size, minimap_size), marker_size)
+
+        for point in map_points:
+            pygame.draw.circle(minimap_surf, point[2], (point[0] + minimap_size, point[1] + minimap_size), marker_size)
+
+        screen.blit(minimap_surf, (screen_width - minimap_size * 2 - 32, 32))
 
         screen.blit(mosaic.render(f"Score: {score}", True, (255, 255, 255)), (16, 0))
 
@@ -388,7 +458,7 @@ def menu():
     decay_zoom = 2
     zoom = 1
     shake = 5
-    decay_shake = 50
+    decay_shake = 25
     fonts144 = [
         pygame.font.Font(f"assets/fonts/{x}.ttf", 144)
         for x in ("Jo_wrote_a_lovesong", "MavenPro-Bold", "Monofett-Regular", "PaletteMosaic-Regular")
